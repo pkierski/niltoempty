@@ -2,6 +2,7 @@ package niltoempty_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/pkierski/niltoempty"
@@ -19,6 +20,35 @@ type (
 		PS *[]any          `json:"ps"`
 	}
 )
+
+func Example() {
+	type T struct {
+		M  map[string]any  `json:"m"`
+		S  []any           `json:"s"`
+		PM *map[string]any `json:"pm"`
+		PS *[]any          `json:"ps"`
+	}
+
+	var v T
+
+	m1, _ := json.MarshalIndent(v, "", "    ")
+	fmt.Println(string(m1))
+	m2, _ := json.MarshalIndent(niltoempty.Initialize(&v), "", "    ")
+	fmt.Println(string(m2))
+	// output
+	// {
+	//     "m": null,
+	//     "s": null,
+	//     "pm": null,
+	//     "ps": null
+	// }
+	// {
+	//     "m": {},
+	//     "s": [],
+	//     "pm": null,
+	//     "ps": null
+	// }
+}
 
 func TestNonPointer(t *testing.T) {
 	assert.Panics(t, func() {
@@ -245,7 +275,14 @@ func TestComplexSlices(t *testing.T) {
 		nil,
 		emptySlice1,
 		emptyMap1,
-		[2][]any{nil, {[]string{"a"}, emptySlice2, emptyMap2}},
+		[2][]any{
+			nil,
+			{
+				[]string{"a"},
+				emptySlice2,
+				emptyMap2,
+			},
+		},
 	}
 	b2, err := json.Marshal(&v)
 	require.NoError(t, err)
