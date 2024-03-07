@@ -8,7 +8,9 @@ import (
 // with empty map and slices respectively.
 //
 // Because input object have to be addressable in order to make changes Initialize
-// panics when non-adresable object is passed as argument.
+// panics when non-addressable object is passed as argument.
+//
+// In case of passing structure with cycles it crashes.
 //
 // Because pointer to element is usually used for modeling optional fields
 // nil pointers to the map or slices are left untouched.
