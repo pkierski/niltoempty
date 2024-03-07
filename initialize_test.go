@@ -83,6 +83,7 @@ func TestSlice(t *testing.T) {
 
 	t.Run("in struct", func(t *testing.T) {
 		var v T
+
 		b, err := json.Marshal(niltoempty.Initialize(&v))
 		require.NoError(t, err)
 		assert.Equal(t, `{"m":{},"s":[]}`, string(b))
@@ -291,4 +292,56 @@ func TestComplexSlices(t *testing.T) {
 	b, err := json.Marshal(niltoempty.Initialize(&v))
 	require.NoError(t, err)
 	assert.Equal(t, `[null,[],{},[[],[["a"],[],{}]]]`, string(b))
+}
+
+func TestCyclic(t *testing.T) {
+	t.Run("via pointer", func(t *testing.T) {
+		type TC struct {
+			P *TC   `json:"p"`
+			S []any `json:"s"`
+		}
+
+		v := TC{}
+		v.P = &v
+		_ = niltoempty.Initialize(&v)
+	})
+
+	t.Run("via interface", func(t *testing.T) {
+		type TC struct {
+			S []any `json:"s"`
+		}
+
+		var emptySlice []string
+		v := TC{make([]any, 2)}
+		v.S[0] = v
+		v.S[1] = v
+		v.S[0] = emptySlice
+		_ = niltoempty.Initialize(&v)
+	})
+
+	t.Run("via slice and map", func(t *testing.T) {
+		type TC struct {
+			S  []TC        `json:"s"`
+			SI []any       `json:"si"`
+			P  *TC         `json:"p"`
+			I  any         `json:"i"`
+			MP map[int]*TC `json:"mp"`
+			MI map[int]any `json:"mi"`
+		}
+
+		v := TC{
+			S:  make([]TC, 2),
+			SI: make([]any, 2),
+			MP: make(map[int]*TC),
+			MI: make(map[int]any),
+		}
+		v.SI[1] = &v
+		v.P = &v
+		v.MP[0] = &v
+		v.MI[0] = v
+		v.SI[0] = v
+		v.S[1] = v
+		//_, _ = json.Marshal(&v)
+		_ = niltoempty.Initialize(&v)
+	})
 }
