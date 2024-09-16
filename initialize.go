@@ -96,8 +96,10 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 	// Recursively iterate over struct fields.
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
-			field := v.Field(i)
-			initializeNils(field, visited)
+			if v.Type().Field(i).IsExported() {
+				field := v.Field(i)
+				initializeNils(field, visited)
+			}
 		}
 	}
 
