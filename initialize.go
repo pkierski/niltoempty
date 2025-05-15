@@ -28,6 +28,15 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 		return
 	}
 
+	// If we somehow received an invalid (zero) reflect.Value, abort early.
+	// This can happen when the value originated from an untyped nil stored
+	// inside an interface{} or map[*,interface{}].  Calling any method that
+	// introspects such a value (Kind, Type, Interface, etc.) would panic, so
+	// we must return immediately instead.
+	if !v.IsValid() {
+		return
+	}
+
 	switch v.Kind() {
 	case reflect.Pointer:
 		if !v.IsNil() {
@@ -56,18 +65,24 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 		// Recursively iterate over map items.
 		iter := v.MapRange()
 		for iter.Next() {
-			// Map element (value) can't be set directly.
-			// we have to alloc addressable replacement for it
-			elemType := iter.Value().Type()
+			val := iter.Value()
+
+			// If the value is invalid (untyped nil stored in interface{}), skip.
+			if !val.IsValid() {
+				continue
+			}
+
+			// Map element (value) can't be set directly; we need an addressable copy.
+			elemType := val.Type()
 			subv := reflect.New(elemType).Elem()
 
-			// copy its original value
-			subv.Set(iter.Value())
+			// Copy its original value.
+			subv.Set(val)
 
-			// replace nil slices and maps inside
+			// Replace nil slices and maps inside.
 			initializeNils(subv, visited)
 
-			// and set the replacement back in map
+			// And set the replacement back in the map.
 			v.SetMapIndex(iter.Key(), subv)
 		}
 
@@ -104,6 +119,10 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 }
 
 func checkVisited(v reflect.Value, visited map[uintptr]bool) bool {
+	if !v.IsValid() {
+		return false
+	}
+
 	kind := v.Kind()
 	if kind == reflect.Map || kind == reflect.Ptr || kind == reflect.Slice {
 		if v.IsNil() {
