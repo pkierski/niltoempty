@@ -45,7 +45,9 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 	case reflect.Slice:
 		// Initialize a nil slice.
 		if v.IsNil() {
-			v.Set(reflect.MakeSlice(v.Type(), 0, 0))
+			if v.CanSet() {
+				v.Set(reflect.MakeSlice(v.Type(), 0, 0))
+			}
 			break
 		}
 
@@ -58,7 +60,9 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 	case reflect.Map:
 		// Initialize a nil map.
 		if v.IsNil() {
-			v.Set(reflect.MakeMap(v.Type()))
+			if v.CanSet() {
+				v.Set(reflect.MakeMap(v.Type()))
+			}
 			break
 		}
 
@@ -93,13 +97,19 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 		}
 
 		valueUnderInterface := reflect.ValueOf(v.Interface())
+		if !valueUnderInterface.IsValid() {
+			return
+		}
+
 		elemType := valueUnderInterface.Type()
 		subv := reflect.New(elemType).Elem()
 		subv.Set(valueUnderInterface)
 
 		initializeNils(subv, visited)
 
-		v.Set(subv)
+		if v.CanSet() {
+			v.Set(subv)
+		}
 
 	// Recursively iterate over array elements.
 	case reflect.Array:
@@ -112,10 +122,18 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
 			field := v.Field(i)
-			initializeNils(field, visited)
+			fieldType := v.Type().Field(i)
+
+			if fieldType.IsExported() {
+				// Process exported fields normally
+				initializeNils(field, visited)
+			} else if field.Kind() == reflect.Ptr && !field.IsNil() {
+				// Even though the field is unexported, if it contains a pointer
+				// to another value, we should process that value
+				initializeNils(field.Elem(), visited)
+			}
 		}
 	}
-
 }
 
 func checkVisited(v reflect.Value, visited map[uintptr]bool) bool {
