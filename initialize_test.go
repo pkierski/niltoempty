@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/pkierski/niltoempty"
 	"github.com/stretchr/testify/assert"
@@ -856,5 +857,258 @@ func TestReflectionLimitations(t *testing.T) {
 			"ExportedSlice inside unexportedStruct should remain nil")
 		assert.Nil(t, test.unexportedStruct.unexportedSlice,
 			"unexportedSlice inside unexportedStruct should remain nil")
+	})
+}
+
+func TestTimeHandling(t *testing.T) {
+	t.Run("struct with time.Time fields", func(t *testing.T) {
+		type TimeStruct struct {
+			CreatedAt    time.Time                        `json:"created_at"`
+			UpdatedAt    *time.Time                       `json:"updated_at"`
+			NullableTime *time.Time                       `json:"nullable_time"`
+			Maps         map[string]time.Time             `json:"maps"`
+			MapPtrs      map[string]*time.Time            `json:"map_ptrs"`
+			Slices       []time.Time                      `json:"slices"`
+			SlicePtrs    []*time.Time                     `json:"slice_ptrs"`
+			NestedMap    map[string]map[string]*time.Time `json:"nested_map"`
+		}
+
+		// Get current time with timezone info
+		location := time.FixedZone("UTC+2", 2*60*60)
+		now := time.Now().In(location)
+
+		// Create a struct with time.Time fields
+		timeStruct := TimeStruct{
+			CreatedAt:    now,
+			UpdatedAt:    nil,
+			NullableTime: nil,
+			Maps:         nil,
+			MapPtrs:      nil,
+			Slices:       nil,
+			SlicePtrs:    nil,
+			NestedMap:    nil,
+		}
+
+		// Initialize the struct
+		niltoempty.Initialize(&timeStruct)
+
+		// Verify that time.Time fields are untouched
+		assert.Equal(t, now, timeStruct.CreatedAt, "CreatedAt time should be unchanged")
+		// Explicitly verify location is preserved
+		assert.Equal(t, location.String(), timeStruct.CreatedAt.Location().String(), "Location information should be preserved")
+		// Check timezone offset
+		_, offset := timeStruct.CreatedAt.Zone()
+		assert.Equal(t, 2*60*60, offset, "Location offset should be preserved")
+
+		assert.Nil(t, timeStruct.UpdatedAt, "UpdatedAt should remain nil")
+		assert.Nil(t, timeStruct.NullableTime, "NullableTime should remain nil")
+
+		// Maps and slices should be initialized
+		assert.NotNil(t, timeStruct.Maps, "Maps should be initialized")
+		assert.Empty(t, timeStruct.Maps, "Maps should be empty")
+		assert.NotNil(t, timeStruct.MapPtrs, "MapPtrs should be initialized")
+		assert.Empty(t, timeStruct.MapPtrs, "MapPtrs should be empty")
+		assert.NotNil(t, timeStruct.Slices, "Slices should be initialized")
+		assert.Empty(t, timeStruct.Slices, "Slices should be empty")
+		assert.NotNil(t, timeStruct.SlicePtrs, "SlicePtrs should be initialized")
+		assert.Empty(t, timeStruct.SlicePtrs, "SlicePtrs should be empty")
+		assert.NotNil(t, timeStruct.NestedMap, "NestedMap should be initialized")
+		assert.Empty(t, timeStruct.NestedMap, "NestedMap should be empty")
+	})
+
+	t.Run("map with time.Time interface values", func(t *testing.T) {
+		// Create a map with time.Time interface values
+		utcLocation := time.UTC
+		now := time.Now().In(utcLocation)
+
+		localLocation, err := time.LoadLocation("Local")
+		require.NoError(t, err, "Loading Local location should not error")
+		localTime := time.Now().In(localLocation)
+
+		m := map[string]interface{}{
+			"utc_time":     now,
+			"local_time":   localTime,
+			"time_ptr":     &now,
+			"nil_time_ptr": (*time.Time)(nil),
+			"time_map": map[string]time.Time{
+				"now": now,
+			},
+			"nil_time_map":   map[string]time.Time(nil),
+			"time_slice":     []time.Time{now, localTime},
+			"nil_time_slice": []time.Time(nil),
+		}
+
+		// Initialize the map
+		niltoempty.Initialize(&m)
+
+		// Verify that time.Time values are untouched
+		assert.Equal(t, now, m["utc_time"], "UTC time should be unchanged")
+		assert.Equal(t, utcLocation.String(), m["utc_time"].(time.Time).Location().String(), "UTC location should be preserved")
+
+		assert.Equal(t, localTime, m["local_time"], "Local time should be unchanged")
+		assert.Equal(t, localLocation.String(), m["local_time"].(time.Time).Location().String(), "Local location should be preserved")
+
+		// Verify pointer to time with location
+		timePtr := m["time_ptr"].(*time.Time)
+		assert.Equal(t, &now, timePtr, "Time pointer should be unchanged")
+		assert.Equal(t, utcLocation.String(), timePtr.Location().String(), "Location in time pointer should be preserved")
+
+		assert.Nil(t, m["nil_time_ptr"], "Nil time pointer should remain nil")
+
+		// Time maps and slices should be initialized
+		timeMap, ok := m["time_map"].(map[string]time.Time)
+		assert.True(t, ok, "time_map should remain a map[string]time.Time")
+		assert.Equal(t, now, timeMap["now"], "Time in map should be unchanged")
+		assert.Equal(t, utcLocation.String(), timeMap["now"].Location().String(), "Location in map value should be preserved")
+
+		nilTimeMap, ok := m["nil_time_map"].(map[string]time.Time)
+		assert.True(t, ok, "nil_time_map should be initialized as map[string]time.Time")
+		assert.Empty(t, nilTimeMap, "Initialized time map should be empty")
+
+		timeSlice, ok := m["time_slice"].([]time.Time)
+		assert.True(t, ok, "time_slice should remain a []time.Time")
+		assert.Equal(t, now, timeSlice[0], "First time in slice should be unchanged")
+		assert.Equal(t, utcLocation.String(), timeSlice[0].Location().String(), "Location of first time in slice should be preserved")
+		assert.Equal(t, localTime, timeSlice[1], "Second time in slice should be unchanged")
+		assert.Equal(t, localLocation.String(), timeSlice[1].Location().String(), "Location of second time in slice should be preserved")
+
+		nilTimeSlice, ok := m["nil_time_slice"].([]time.Time)
+		assert.True(t, ok, "nil_time_slice should be initialized as []time.Time")
+		assert.Empty(t, nilTimeSlice, "Initialized time slice should be empty")
+	})
+
+	t.Run("struct with time.Time in nested interface fields", func(t *testing.T) {
+		type EventWithTimeData struct {
+			Metadata map[string]interface{} `json:"metadata"`
+			Payload  interface{}            `json:"payload"`
+		}
+
+		type TimeData struct {
+			CreatedAt time.Time   `json:"created_at"`
+			Times     []time.Time `json:"times"`
+		}
+
+		// Create a custom location
+		customLocation := time.FixedZone("UTC-5", -5*60*60)
+		now := time.Now().In(customLocation)
+		timeData := TimeData{
+			CreatedAt: now,
+			Times:     nil,
+		}
+
+		event := EventWithTimeData{
+			Metadata: map[string]interface{}{
+				"timestamp":  now,
+				"time_data":  timeData,
+				"time_slice": []time.Time(nil),
+			},
+			Payload: timeData,
+		}
+
+		// Initialize the struct
+		niltoempty.Initialize(&event)
+
+		// Verify time fields in metadata
+		assert.Equal(t, now, event.Metadata["timestamp"], "Timestamp in metadata should be unchanged")
+		assert.Equal(t, customLocation.String(), event.Metadata["timestamp"].(time.Time).Location().String(),
+			"Location in timestamp should be preserved")
+
+		// Verify timezone offset
+		_, offset := event.Metadata["timestamp"].(time.Time).Zone()
+		assert.Equal(t, -5*60*60, offset, "Location offset should be preserved")
+
+		metadataTimeData, ok := event.Metadata["time_data"].(TimeData)
+		assert.True(t, ok, "time_data in metadata should remain a TimeData struct")
+		assert.Equal(t, now, metadataTimeData.CreatedAt, "CreatedAt in metadata should be unchanged")
+		assert.Equal(t, customLocation.String(), metadataTimeData.CreatedAt.Location().String(),
+			"Location in metadata TimeData should be preserved")
+		assert.NotNil(t, metadataTimeData.Times, "Times in metadata should be initialized")
+		assert.Empty(t, metadataTimeData.Times, "Times in metadata should be empty")
+
+		metadataTimeSlice, ok := event.Metadata["time_slice"].([]time.Time)
+		assert.True(t, ok, "time_slice in metadata should be initialized as []time.Time")
+		assert.Empty(t, metadataTimeSlice, "Time slice in metadata should be empty")
+
+		// Verify time fields in payload
+		payloadTimeData, ok := event.Payload.(TimeData)
+		assert.True(t, ok, "payload should remain a TimeData struct")
+		assert.Equal(t, now, payloadTimeData.CreatedAt, "CreatedAt in payload should be unchanged")
+		assert.Equal(t, customLocation.String(), payloadTimeData.CreatedAt.Location().String(),
+			"Location in payload TimeData should be preserved")
+		assert.NotNil(t, payloadTimeData.Times, "Times in payload should be initialized")
+		assert.Empty(t, payloadTimeData.Times, "Times in payload should be empty")
+	})
+
+	t.Run("complex struct with time.Time inside slices and maps", func(t *testing.T) {
+		type TimeEvent struct {
+			Timestamp time.Time            `json:"timestamp"`
+			Tags      map[string]time.Time `json:"tags"`
+		}
+
+		type ComplexTimeStruct struct {
+			Events      []TimeEvent                     `json:"events"`
+			EventsByTag map[string][]TimeEvent          `json:"events_by_tag"`
+			TimesByTag  map[string]map[string]time.Time `json:"times_by_tag"`
+		}
+
+		// Create times with different locations
+		utcLocation := time.UTC
+		now := time.Now().In(utcLocation)
+
+		estLocation := time.FixedZone("EST", -5*60*60)
+		yesterday := now.Add(-24 * time.Hour).In(estLocation)
+
+		// Initialize with nil maps and slices
+		complex := ComplexTimeStruct{
+			Events:      nil,
+			EventsByTag: nil,
+			TimesByTag:  nil,
+		}
+
+		// Initialize the complex struct
+		niltoempty.Initialize(&complex)
+
+		// Verify nested fields are initialized
+		assert.NotNil(t, complex.Events, "Events should be initialized")
+		assert.Empty(t, complex.Events, "Events should be empty")
+		assert.NotNil(t, complex.EventsByTag, "EventsByTag should be initialized")
+		assert.Empty(t, complex.EventsByTag, "EventsByTag should be empty")
+		assert.NotNil(t, complex.TimesByTag, "TimesByTag should be initialized")
+		assert.Empty(t, complex.TimesByTag, "TimesByTag should be empty")
+
+		// Add elements and verify they're handled correctly
+		complex.Events = append(complex.Events, TimeEvent{Timestamp: now, Tags: nil})
+		complex.EventsByTag = map[string][]TimeEvent{
+			"test": {
+				{Timestamp: yesterday, Tags: nil},
+			},
+		}
+		complex.TimesByTag = map[string]map[string]time.Time{
+			"test": nil,
+		}
+
+		// Re-initialize and verify
+		niltoempty.Initialize(&complex)
+
+		// Verify time fields are preserved and nil maps initialized
+		assert.Equal(t, now, complex.Events[0].Timestamp, "Event timestamp should be unchanged")
+		assert.Equal(t, utcLocation.String(), complex.Events[0].Timestamp.Location().String(),
+			"Location in Events timestamp should be preserved")
+		assert.NotNil(t, complex.Events[0].Tags, "Event tags should be initialized")
+		assert.Empty(t, complex.Events[0].Tags, "Event tags should be empty")
+
+		assert.Equal(t, yesterday, complex.EventsByTag["test"][0].Timestamp, "EventsByTag timestamp should be unchanged")
+		assert.Equal(t, estLocation.String(), complex.EventsByTag["test"][0].Timestamp.Location().String(),
+			"Location in EventsByTag timestamp should be preserved")
+
+		// Verify timezone offset
+		_, offset := complex.EventsByTag["test"][0].Timestamp.Zone()
+		assert.Equal(t, -5*60*60, offset, "Location offset should be preserved")
+
+		assert.NotNil(t, complex.EventsByTag["test"][0].Tags, "EventsByTag tags should be initialized")
+		assert.Empty(t, complex.EventsByTag["test"][0].Tags, "EventsByTag tags should be empty")
+
+		assert.NotNil(t, complex.TimesByTag["test"], "TimesByTag map should be initialized")
+		assert.Empty(t, complex.TimesByTag["test"], "TimesByTag map should be empty")
 	})
 }
