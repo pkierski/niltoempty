@@ -28,6 +28,13 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 		return
 	}
 
+	// If we somehow received an invalid (zero) reflect.Value, abort early.
+	// This can happen when the value originated from an untyped nil stored
+	// inside an interface{} or map[*,interface{}].
+	if !v.IsValid() {
+		return
+	}
+
 	switch v.Kind() {
 	case reflect.Pointer:
 		if !v.IsNil() {
@@ -36,7 +43,9 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 	case reflect.Slice:
 		// Initialize a nil slice.
 		if v.IsNil() {
-			v.Set(reflect.MakeSlice(v.Type(), 0, 0))
+			if v.CanSet() {
+				v.Set(reflect.MakeSlice(v.Type(), 0, 0))
+			}
 			break
 		}
 
@@ -49,20 +58,29 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 	case reflect.Map:
 		// Initialize a nil map.
 		if v.IsNil() {
-			v.Set(reflect.MakeMap(v.Type()))
+			if v.CanSet() {
+				v.Set(reflect.MakeMap(v.Type()))
+			}
 			break
 		}
 
 		// Recursively iterate over map items.
 		iter := v.MapRange()
 		for iter.Next() {
+			val := iter.Value()
+
+			// If the value is invalid (untyped nil stored in interface{}), skip.
+			if !val.IsValid() {
+				continue
+			}
+
 			// Map element (value) can't be set directly.
 			// we have to alloc addressable replacement for it
-			elemType := iter.Value().Type()
+			elemType := val.Type()
 			subv := reflect.New(elemType).Elem()
 
 			// copy its original value
-			subv.Set(iter.Value())
+			subv.Set(val)
 
 			// replace nil slices and maps inside
 			initializeNils(subv, visited)
@@ -78,13 +96,19 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 		}
 
 		valueUnderInterface := reflect.ValueOf(v.Interface())
+		if !valueUnderInterface.IsValid() {
+			return
+		}
+
 		elemType := valueUnderInterface.Type()
 		subv := reflect.New(elemType).Elem()
 		subv.Set(valueUnderInterface)
 
 		initializeNils(subv, visited)
 
-		v.Set(subv)
+		if v.CanSet() {
+			v.Set(subv)
+		}
 
 	// Recursively iterate over array elements.
 	case reflect.Array:
@@ -97,13 +121,25 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
 			field := v.Field(i)
-			initializeNils(field, visited)
+			fieldType := v.Type().Field(i)
+
+			if fieldType.IsExported() {
+				// Process exported fields normally
+				initializeNils(field, visited)
+			} else if field.Kind() == reflect.Ptr && !field.IsNil() {
+				// Even though the field is unexported, if it contains a pointer
+				// to another value, we should process that value
+				initializeNils(field.Elem(), visited)
+			}
 		}
 	}
-
 }
 
 func checkVisited(v reflect.Value, visited map[uintptr]bool) bool {
+	if !v.IsValid() {
+		return false
+	}
+
 	kind := v.Kind()
 	if kind == reflect.Map || kind == reflect.Ptr || kind == reflect.Slice {
 		if v.IsNil() {

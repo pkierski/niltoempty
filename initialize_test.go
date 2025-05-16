@@ -345,3 +345,150 @@ func TestCyclic(t *testing.T) {
 		_ = niltoempty.Initialize(&v)
 	})
 }
+
+func TestPrivateFields(t *testing.T) {
+	t.Run("struct with private fields", func(t *testing.T) {
+		type Inner struct {
+			Public  []string         `json:"public"`
+			private []string         `json:"private"`
+			Mixed   map[string][]int `json:"mixed"`
+		}
+
+		type Outer struct {
+			InnerPtr *Inner `json:"inner_ptr"`
+			private  map[string]string
+			Public   map[string]interface{} `json:"public"`
+		}
+
+		// Create test data with nil slices and maps
+		test := Outer{
+			InnerPtr: &Inner{
+				Public:  nil,
+				private: nil,
+				Mixed:   nil,
+			},
+			private: nil,
+			Public:  nil,
+		}
+
+		// Initialize the struct
+		niltoempty.Initialize(&test)
+
+		// Public fields should be initialized
+		assert.NotNil(t, test.Public, "Public field should be initialized")
+		assert.Empty(t, test.Public, "Public field should be empty map")
+
+		require.NotNil(t, test.InnerPtr, "InnerPtr should remain non-nil")
+		assert.NotNil(t, test.InnerPtr.Public, "Nested public field should be initialized")
+		assert.Empty(t, test.InnerPtr.Public, "Nested public field should be empty slice")
+		assert.NotNil(t, test.InnerPtr.Mixed, "Nested mixed field should be initialized")
+		assert.Empty(t, test.InnerPtr.Mixed, "Nested mixed field should be empty map")
+
+		// Private fields should remain nil
+		assert.Nil(t, test.private, "Private field should remain nil")
+		assert.Nil(t, test.InnerPtr.private, "Nested private field should remain nil")
+	})
+
+	t.Run("recursion with mixed private/public fields", func(t *testing.T) {
+		type RecursiveStruct struct {
+			Public      []map[string]interface{} `json:"public"`
+			private     map[string][]interface{}
+			RecursiveP  *RecursiveStruct `json:"recursive_p"`
+			recursiveP2 *RecursiveStruct
+		}
+
+		// Create a recursive structure
+		recursive := &RecursiveStruct{
+			Public:      nil,
+			private:     nil,
+			RecursiveP:  &RecursiveStruct{Public: nil, private: nil},
+			recursiveP2: &RecursiveStruct{Public: nil, private: nil},
+		}
+
+		// This should not panic and should only initialize the public fields
+		niltoempty.Initialize(recursive)
+
+		// Check public fields are initialized
+		assert.NotNil(t, recursive.Public, "Public field should be initialized")
+		assert.Empty(t, recursive.Public, "Public field should be empty slice")
+		assert.Nil(t, recursive.private, "Private field should remain nil")
+
+		// Check nested public struct
+		require.NotNil(t, recursive.RecursiveP, "RecursiveP should remain non-nil")
+		assert.NotNil(t, recursive.RecursiveP.Public, "Nested public field should be initialized")
+		assert.Empty(t, recursive.RecursiveP.Public, "Nested public field should be empty slice")
+		assert.Nil(t, recursive.RecursiveP.private, "Nested private field should remain nil")
+
+		// Check nested private struct - we don't initialize its fields because it's unexported
+		require.NotNil(t, recursive.recursiveP2, "recursiveP2 should remain non-nil")
+		// Note: Due to the limitations of reflection and Go's visibility rules,
+		// we cannot initialize fields within unexported struct pointers
+		assert.Nil(t, recursive.recursiveP2.Public, "Fields inside private pointers aren't initialized")
+	})
+}
+
+func TestEdgeCases(t *testing.T) {
+	t.Run("invalid values", func(t *testing.T) {
+		// Interface with untyped nil
+		m := map[string]interface{}{
+			"valid": []string{},
+			"nil":   nil,
+		}
+
+		// Should not panic
+		niltoempty.Initialize(&m)
+
+		// Check that nil values remain nil
+		assert.Nil(t, m["nil"], "Untyped nil should remain nil")
+		assert.NotNil(t, m["valid"], "Valid value should not be nil")
+	})
+
+	t.Run("map with mixed nil values", func(t *testing.T) {
+		// A map with various nil values including typed nils
+		var nilSlice []int
+		var nilMap map[string]int
+
+		m := map[string]interface{}{
+			"untypedNil": nil,
+			"nilSlice":   nilSlice,
+			"nilMap":     nilMap,
+			"nilPtr":     (*string)(nil),
+		}
+
+		// Should not panic
+		niltoempty.Initialize(&m)
+
+		// Check that slices and maps are initialized but pointers and untyped nils are not
+		assert.Nil(t, m["untypedNil"], "Untyped nil should remain nil")
+		assert.NotNil(t, m["nilSlice"], "nil slice should be initialized")
+		assert.Empty(t, m["nilSlice"], "initialized slice should be empty")
+		assert.NotNil(t, m["nilMap"], "nil map should be initialized")
+		assert.Empty(t, m["nilMap"], "initialized map should be empty")
+		assert.Nil(t, m["nilPtr"], "nil pointer should remain nil")
+	})
+
+	t.Run("struct with embedded fields", func(t *testing.T) {
+		type Embedded struct {
+			Slice []string
+			Map   map[string]int
+		}
+
+		type Container struct {
+			Embedded            // Embedded struct
+			ExplicitField []int // Regular field
+		}
+
+		c := Container{}
+
+		// Should not panic and should initialize all nil slices and maps
+		niltoempty.Initialize(&c)
+
+		// Check that all fields are initialized
+		assert.NotNil(t, c.Slice, "Embedded Slice should be initialized")
+		assert.Empty(t, c.Slice, "Embedded Slice should be empty")
+		assert.NotNil(t, c.Map, "Embedded Map should be initialized")
+		assert.Empty(t, c.Map, "Embedded Map should be empty")
+		assert.NotNil(t, c.ExplicitField, "ExplicitField should be initialized")
+		assert.Empty(t, c.ExplicitField, "ExplicitField should be empty")
+	})
+}
