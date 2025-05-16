@@ -707,11 +707,12 @@ func TestPrivateFields(t *testing.T) {
 		assert.Empty(t, recursive.RecursiveP.Public, "Nested public field should be empty slice")
 		assert.Nil(t, recursive.RecursiveP.private, "Nested private field should remain nil")
 
-		// Check nested private struct - we don't initialize its fields because it's unexported
+		// Check nested private struct pointer
 		require.NotNil(t, recursive.recursiveP2, "recursiveP2 should remain non-nil")
-		// Note: Due to the limitations of reflection and Go's visibility rules,
-		// we cannot initialize fields within unexported struct pointers
-		assert.Nil(t, recursive.recursiveP2.Public, "Fields inside private pointers aren't initialized")
+		// While we can reach fields inside unexported pointer fields, we can't modify them
+		// because the struct they belong to is not addressable (can't be set)
+		assert.Nil(t, recursive.recursiveP2.Public, "Public field in private struct pointer remains nil")
+		assert.Nil(t, recursive.recursiveP2.private, "Private field in private struct pointer remains nil")
 	})
 }
 
@@ -778,5 +779,82 @@ func TestEdgeCases(t *testing.T) {
 		assert.Empty(t, c.Map, "Embedded Map should be empty")
 		assert.NotNil(t, c.ExplicitField, "ExplicitField should be initialized")
 		assert.Empty(t, c.ExplicitField, "ExplicitField should be empty")
+	})
+}
+
+func TestReflectionLimitations(t *testing.T) {
+	t.Run("reflection rules with exported vs unexported", func(t *testing.T) {
+		type InnerType struct {
+			ExportedSlice   []int
+			unexportedSlice []int
+		}
+
+		type TestStruct struct {
+			// Direct exported pointer to a struct with exported and unexported fields
+			ExportedPtr *InnerType
+
+			// Unexported pointer to a struct with exported and unexported fields
+			unexportedPtr *InnerType
+
+			// Direct exported struct with exported and unexported fields
+			ExportedStruct InnerType
+
+			// Unexported struct with exported and unexported fields
+			unexportedStruct InnerType
+		}
+
+		// Create test data with all nil slices
+		test := TestStruct{
+			ExportedPtr: &InnerType{
+				ExportedSlice:   nil,
+				unexportedSlice: nil,
+			},
+			unexportedPtr: &InnerType{
+				ExportedSlice:   nil,
+				unexportedSlice: nil,
+			},
+			ExportedStruct: InnerType{
+				ExportedSlice:   nil,
+				unexportedSlice: nil,
+			},
+			unexportedStruct: InnerType{
+				ExportedSlice:   nil,
+				unexportedSlice: nil,
+			},
+		}
+
+		// Initialize the struct
+		niltoempty.Initialize(&test)
+
+		// Verify behavior for the exported pointer case:
+		// - Exported slice inside the struct pointed to by an exported pointer SHOULD be initialized
+		assert.NotNil(t, test.ExportedPtr.ExportedSlice,
+			"ExportedSlice inside ExportedPtr should be initialized")
+		// - Unexported slice inside remains nil even when the parent struct is accessible
+		assert.Nil(t, test.ExportedPtr.unexportedSlice,
+			"unexportedSlice inside ExportedPtr should remain nil")
+
+		// Verify behavior for the unexported pointer case:
+		// - The struct pointed to by an unexported pointer can be accessed
+		// - But the exported fields inside cannot be set because the struct is not addressable
+		assert.Nil(t, test.unexportedPtr.ExportedSlice,
+			"ExportedSlice inside unexportedPtr should remain nil")
+		assert.Nil(t, test.unexportedPtr.unexportedSlice,
+			"unexportedSlice inside unexportedPtr should remain nil")
+
+		// Verify behavior for the exported struct case:
+		// - Exported slice inside an exported struct field SHOULD be initialized
+		assert.NotNil(t, test.ExportedStruct.ExportedSlice,
+			"ExportedSlice inside ExportedStruct should be initialized")
+		// - Unexported slice inside remains nil even when the parent struct is accessible
+		assert.Nil(t, test.ExportedStruct.unexportedSlice,
+			"unexportedSlice inside ExportedStruct should remain nil")
+
+		// Verify behavior for the unexported struct case:
+		// - We can't set any fields (exported or not) inside an unexported struct field
+		assert.Nil(t, test.unexportedStruct.ExportedSlice,
+			"ExportedSlice inside unexportedStruct should remain nil")
+		assert.Nil(t, test.unexportedStruct.unexportedSlice,
+			"unexportedSlice inside unexportedStruct should remain nil")
 	})
 }
