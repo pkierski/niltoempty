@@ -23,6 +23,14 @@ func Initialize(obj interface{}) interface{} {
 	return obj
 }
 
+// initializeNils recursively traverses the value and replaces nil slices and maps with empty ones.
+// It respects Go's reflection rules regarding unexported fields:
+//   - Exported fields can be read and modified
+//   - Unexported fields can be read but not modified (without unsafe)
+//   - Unexported pointer fields can be traversed (we can follow the pointer) even though
+//     the pointer itself cannot be modified
+//   - The fields inside an unexported pointer field cannot be modified either, as they
+//     belong to a struct that is not addressable through reflection
 func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 	if checkVisited(v, visited) {
 		return
@@ -124,17 +132,23 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 			fieldType := v.Type().Field(i)
 
 			if fieldType.IsExported() {
-				// Process exported fields normally
+				// Process exported fields normally - these can be both read and modified
 				initializeNils(field, visited)
 			} else if field.Kind() == reflect.Ptr && !field.IsNil() {
-				// Even though the field is unexported, if it contains a pointer
-				// to another value, we should process that value
+				// Handle unexported pointer fields:
+				// Even though the field itself is unexported (and we can't modify the pointer),
+				// we can follow the pointer to process the value it points to.
+				// However, we can't modify fields inside this dereferenced value
+				// because the struct itself is not addressable through reflection.
 				initializeNils(field.Elem(), visited)
 			}
+			// Skip all other unexported fields as we can't modify them without using unsafe
 		}
 	}
 }
 
+// checkVisited tracks values we've already processed to avoid infinite recursion
+// in cyclic data structures.
 func checkVisited(v reflect.Value, visited map[uintptr]bool) bool {
 	if !v.IsValid() {
 		return false
