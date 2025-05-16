@@ -122,6 +122,9 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 	case reflect.Array:
 		for i := 0; i < v.Len(); i++ {
 			elem := v.Index(i)
+			if !elem.CanSet() {
+				continue
+			}
 			initializeNils(elem, visited)
 		}
 
@@ -144,6 +147,8 @@ func initializeNils(v reflect.Value, visited map[uintptr]bool) {
 			}
 			// Skip all other unexported fields as we can't modify them without using unsafe
 		}
+	default:
+		// Skip unsupported kinds
 	}
 }
 
